@@ -177,11 +177,16 @@ function renderNodemenu() {
   const manage = document.createElement('button');
   manage.className = 'menu-action';
   manage.textContent = '⚙  Управление серверами';
-  manage.addEventListener('click', () => { closeNodemenu(); openVault(); });
+  manage.addEventListener('click', () => { openVault(); closeNodemenu(); });
   nodemenu.appendChild(manage);
 }
-function openNodemenu() { renderNodemenu(); nodemenu.classList.add('open'); }
-function closeNodemenu() { nodemenu.classList.remove('open'); }
+// Прячем слой страницы, если открыт любой оверлей (иначе он лёг бы за страницу).
+function syncOverlay() {
+  const on = nodemenu.classList.contains('open') || vault.classList.contains('open');
+  window.aqua.overlay(on);
+}
+function openNodemenu() { renderNodemenu(); nodemenu.classList.add('open'); syncOverlay(); }
+function closeNodemenu() { nodemenu.classList.remove('open'); syncOverlay(); }
 shield.addEventListener('click', (e) => { e.stopPropagation(); nodemenu.classList.contains('open') ? closeNodemenu() : openNodemenu(); });
 document.addEventListener('click', (e) => { if (!nodemenu.contains(e.target) && e.target !== shield) closeNodemenu(); });
 
@@ -200,8 +205,8 @@ document.addEventListener('keydown', (e) => {
 const vault = $('vault'), scrim = $('scrim'), slabsEl = $('slabs');
 let editingId = null;
 
-function openVault() { scrim.classList.add('open'); vault.classList.add('open'); renderSlabs(); pingAll(); }
-function closeVault() { scrim.classList.remove('open'); vault.classList.remove('open'); closeForm(); }
+function openVault() { scrim.classList.add('open'); vault.classList.add('open'); renderSlabs(); pingAll(); syncOverlay(); }
+function closeVault() { scrim.classList.remove('open'); vault.classList.remove('open'); closeForm(); syncOverlay(); }
 $('gear').addEventListener('click', openVault);
 $('vclose').addEventListener('click', closeVault);
 scrim.addEventListener('click', closeVault);

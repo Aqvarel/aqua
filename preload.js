@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('aqua', {
   nav: (msg) => ipcRenderer.send('nav', msg),
   on: (channel, cb) => ipcRenderer.on(channel, (_e, data) => cb(data)),
+  // прячет/показывает слой страницы, чтобы оверлеи (меню, настройки) были сверху
+  overlay: (on) => ipcRenderer.send('overlay', on),
   // управление флотом прокси (двусторонние вызовы)
   proxies: {
     list: () => ipcRenderer.invoke('proxy:list'),

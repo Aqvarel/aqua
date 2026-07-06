@@ -16,6 +16,7 @@ let win;
 const tabs = new Map(); // id -> WebContentsView
 let activeId = null;
 let nextId = 1;
+let overlayOn = false; // открыт ли оверлей (тогда страница спрятана)
 
 // ---- Флот прокси: аутентификация по паре host:port ----
 // Несколько прокси сосуществуют: пароль ищется по адресу того сервера,
@@ -208,7 +209,7 @@ function createTab(url) {
 function activateTab(id) {
   if (!tabs.has(id)) return;
   activeId = id;
-  for (const [tid, v] of tabs) v.setVisible(tid === id);
+  for (const [tid, v] of tabs) v.setVisible(tid === id && !overlayOn);
   layoutActive();
   send('tab-activated', { id });
   const wc = tabs.get(id).webContents;
@@ -282,6 +283,14 @@ ipcMain.on('nav', (e, { action, id, value }) => {
     case 'closetab': closeTab(id); break;
     case 'activate': activateTab(id); break;
   }
+});
+
+// Слой страницы лежит поверх HTML-интерфейса, поэтому на время показа
+// оверлеев (меню серверов, «Хранилище») прячем активную страницу.
+ipcMain.on('overlay', (e, on) => {
+  overlayOn = !!on;
+  const v = tabs.get(activeId);
+  if (v) v.setVisible(!overlayOn);
 });
 
 // ---- управление флотом прокси ----
