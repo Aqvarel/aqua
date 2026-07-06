@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 
 const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
-const CHROME_HEIGHT = 88; // высота нашей верхней панели, px
+const CHROME_HEIGHT = 92; // высота нашей верхней панели, px (42 вкладки + 50 тулбар)
 
 let win;
 const tabs = new Map(); // id -> WebContentsView

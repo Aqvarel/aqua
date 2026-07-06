@@ -7,6 +7,7 @@ const back = document.getElementById('back');
 const forward = document.getElementById('forward');
 const reload = document.getElementById('reload');
 const lock = document.getElementById('lock');
+const progress = document.getElementById('progress');
 
 let active = null;
 const tabEls = new Map(); // id -> { el, title }
@@ -60,6 +61,7 @@ window.aqua.on('tab-updated', (s) => {
     if (document.activeElement !== urlInput) urlInput.value = s.url || '';
     back.disabled = !s.canGoBack;
     forward.disabled = !s.canGoForward;
+    progress.classList.toggle('loading', !!s.loading);
     lock.classList.toggle('secure', (s.url || '').startsWith('https://'));
     reload.querySelector('path').setAttribute('d',
       s.loading ? 'M6 6l12 12M18 6L6 18' : 'M20 11a8 8 0 10-2.3 5.7M20 4v5h-5');
