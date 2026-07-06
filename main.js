@@ -10,13 +10,17 @@ const tcp = require('net');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 let CFG = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-const CHROME_HEIGHT = 92;
+
+// Геометрия «Aqua — one»: рейл + боковая панель слева, карточка страницы справа.
+const RAIL = 66, SIDEBAR = 238, TOOLBAR = 52, PAD = 10, BORDER = 1;
+const LEFT = RAIL + SIDEBAR;
 
 let win;
 const tabs = new Map(); // id -> WebContentsView
+const newTabIds = new Set(); // вкладки на экране «новая вкладка» (страница спрятана)
 let activeId = null;
 let nextId = 1;
-let overlayOn = false; // открыт ли оверлей (тогда страница спрятана)
+let overlayOn = false; // открыт ли оверлей (меню/настройки — страница спрятана)
 
 // ---- Флот прокси: аутентификация по паре host:port ----
 // Несколько прокси сосуществуют: пароль ищется по адресу того сервера,
@@ -170,7 +174,17 @@ function layoutActive() {
   const view = tabs.get(activeId);
   if (!view) return;
   const { width, height } = win.getContentBounds();
-  view.setBounds({ x: 0, y: CHROME_HEIGHT, width, height: height - CHROME_HEIGHT });
+  const x = LEFT + BORDER;             // слева рейл+панель, +рамка карточки
+  const y = PAD + TOOLBAR + BORDER;    // сверху отступ карточки + тулбар
+  view.setBounds({ x, y, width: width - x - PAD - BORDER, height: height - y - PAD - BORDER });
+}
+
+// Видимость активной страницы: спрятана, если открыт оверлей или это «новая вкладка».
+function updateStage() {
+  const v = tabs.get(activeId);
+  const isNew = newTabIds.has(activeId);
+  if (v) v.setVisible(!overlayOn && !isNew);
+  send('stage', { newtab: isNew });
 }
 
 function wireView(id, view) {
@@ -197,10 +211,12 @@ function createTab(url) {
   const view = new WebContentsView({
     webPreferences: { session: proxiedSession(), contextIsolation: true, sandbox: true },
   });
+  try { view.setBorderRadius(10); } catch {} // скругление карточки страницы (если поддерживается)
   tabs.set(id, view);
   win.contentView.addChildView(view);
   wireView(id, view);
-  view.webContents.loadURL(url || CFG.homepage);
+  if (url) view.webContents.loadURL(url);
+  else { newTabIds.add(id); view.webContents.loadURL('about:blank'); } // экран новой вкладки
   send('tab-created', { id });
   activateTab(id);
   return id;
@@ -209,7 +225,7 @@ function createTab(url) {
 function activateTab(id) {
   if (!tabs.has(id)) return;
   activeId = id;
-  for (const [tid, v] of tabs) v.setVisible(tid === id && !overlayOn);
+  for (const [tid, v] of tabs) v.setVisible(tid === id && !overlayOn && !newTabIds.has(id));
   layoutActive();
   send('tab-activated', { id });
   const wc = tabs.get(id).webContents;
@@ -219,6 +235,7 @@ function activateTab(id) {
     canGoForward: wc.navigationHistory.canGoForward(),
     loading: wc.isLoading(),
   });
+  send('stage', { newtab: newTabIds.has(id) });
 }
 
 function closeTab(id) {
@@ -255,8 +272,8 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1200, height: 800, minWidth: 760, minHeight: 480,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 20 },
-    backgroundColor: '#0a0c12',
+    trafficLightPosition: { x: 19, y: 24 }, // кнопки окна macOS садятся в рейл
+    backgroundColor: '#070808',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
@@ -274,7 +291,7 @@ ipcMain.on('nav', (e, { action, id, value }) => {
   const view = tabs.get(id ?? activeId);
   const wc = view && view.webContents;
   switch (action) {
-    case 'go': if (wc) wc.loadURL(toURL(value)); break;
+    case 'go': if (wc) { wc.loadURL(toURL(value)); newTabIds.delete(id ?? activeId); updateStage(); } break;
     case 'back': if (wc && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); break;
     case 'forward': if (wc && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); break;
     case 'reload': if (wc) wc.reload(); break;
@@ -290,7 +307,7 @@ ipcMain.on('nav', (e, { action, id, value }) => {
 ipcMain.on('overlay', (e, on) => {
   overlayOn = !!on;
   const v = tabs.get(activeId);
-  if (v) v.setVisible(!overlayOn);
+  if (v) v.setVisible(!overlayOn && !newTabIds.has(activeId));
 });
 
 // ---- управление флотом прокси ----
