@@ -1,0 +1,10 @@
+{
+  "proxy": {
+    "host": "ВАШ_IP_СЕРВЕРА",
+    "port": 8888,
+    "user": "aqua",
+    "pass": "ВАШ_ПАРОЛЬ_ПРОКСИ"
+  },
+  "homepage": "https://www.google.com",
+  "searchUrl": "https://www.google.com/search?q="
+}

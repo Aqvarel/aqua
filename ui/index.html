@@ -1,0 +1,199 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; img-src https: data:;" />
+<style>
+  /* ---- Палитра: глубокий чернильно-синий нейтрал + один акцент «аква» ---- */
+  :root {
+    --bg: #0e0f13;
+    --chrome: #14161d;
+    --chrome-hi: #1c1f29;
+    --surface: #21252f;
+    --line: #2b303c;
+    --text: #e7eaf0;
+    --muted: #8a91a1;
+    --accent: #46d3d8;
+    --accent-soft: rgba(70, 211, 216, 0.14);
+    --danger: #ff6b6b;
+    --shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef1f5;
+      --chrome: #e4e8ee;
+      --chrome-hi: #d7dce4;
+      --surface: #ffffff;
+      --line: #cdd3dd;
+      --text: #1a1d24;
+      --muted: #626b7a;
+      --accent: #0e9ba0;
+      --accent-soft: rgba(14, 155, 160, 0.12);
+      --danger: #d64545;
+      --shadow: 0 1px 0 rgba(255,255,255,0.6) inset;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--text);
+    background: var(--chrome);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Вся верхняя панель — перетаскиваемая область окна; кнопки/поля исключаем */
+  #chrome { -webkit-app-region: drag; }
+  button, input, .tab { -webkit-app-region: no-drag; }
+
+  /* ---- Ряд вкладок ---- */
+  #tabstrip {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 40px;
+    padding: 6px 10px 0 84px; /* слева место под «светофор» macOS */
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 220px;
+    min-width: 46px;
+    height: 32px;
+    padding: 0 8px 0 12px;
+    border-radius: 9px 9px 0 0;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    cursor: default;
+    transition: background 0.14s, color 0.14s;
+  }
+  .tab:hover { background: var(--chrome-hi); color: var(--text); }
+  .tab.active { background: var(--bg); color: var(--text); }
+  .tab .title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+  }
+  .tab .spinner {
+    width: 12px; height: 12px; flex: none;
+    border: 2px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  .tab .close {
+    width: 18px; height: 18px; flex: none;
+    border: none; border-radius: 5px;
+    background: transparent; color: inherit;
+    font-size: 14px; line-height: 1;
+    opacity: 0; cursor: default;
+    display: grid; place-items: center;
+  }
+  .tab:hover .close { opacity: 0.7; }
+  .tab .close:hover { opacity: 1; background: var(--surface); }
+  #newtab {
+    width: 30px; height: 30px; flex: none;
+    border: none; border-radius: 8px;
+    background: transparent; color: var(--muted);
+    font-size: 19px; cursor: default;
+    display: grid; place-items: center;
+    transition: background 0.14s, color 0.14s;
+  }
+  #newtab:hover { background: var(--chrome-hi); color: var(--text); }
+
+  /* ---- Ряд инструментов ---- */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 48px;
+    padding: 0 12px;
+    background: var(--bg);
+    border-top: 1px solid transparent;
+  }
+  .navbtn {
+    width: 32px; height: 32px; flex: none;
+    border: none; border-radius: 8px;
+    background: transparent; color: var(--text);
+    cursor: default;
+    display: grid; place-items: center;
+    transition: background 0.14s, opacity 0.14s;
+  }
+  .navbtn:hover { background: var(--surface); }
+  .navbtn:disabled { opacity: 0.28; }
+  .navbtn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Адресная строка — «пилюля» с индикатором защищённого соединения */
+  #address {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 17px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    transition: border-color 0.14s, box-shadow 0.14s;
+  }
+  #address:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  #lock { width: 13px; height: 13px; flex: none; color: var(--muted); }
+  #lock.secure { color: var(--accent); }
+  #url {
+    flex: 1;
+    border: none; outline: none; background: transparent;
+    color: var(--text); font-size: 13px;
+    -webkit-user-select: text; user-select: text;
+  }
+  #url::placeholder { color: var(--muted); }
+  #shield {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--accent);
+    padding: 3px 9px; border-radius: 11px;
+    background: var(--accent-soft);
+    flex: none;
+    letter-spacing: 0.02em;
+  }
+  #shield svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+  <div id="chrome">
+    <div id="tabstrip">
+      <button id="newtab" title="Новая вкладка">+</button>
+    </div>
+    <div id="toolbar">
+      <button class="navbtn" id="back" title="Назад" disabled>
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <button class="navbtn" id="forward" title="Вперёд" disabled>
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+      </button>
+      <button class="navbtn" id="reload" title="Обновить">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v5h-5"/></svg>
+      </button>
+      <div id="address">
+        <svg id="lock" class="secure" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm3 8H9V7a3 3 0 016 0v3z"/></svg>
+        <input id="url" type="text" placeholder="Поиск или адрес сайта" spellcheck="false" autocomplete="off" />
+        <span id="shield" title="Весь трафик идёт через ваш сервер">
+          <svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></svg>
+          Aqua
+        </span>
+      </div>
+    </div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

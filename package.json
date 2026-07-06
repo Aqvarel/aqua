@@ -1,0 +1,22 @@
+{
+  "name": "aqua-browser",
+  "version": "1.0.0",
+  "description": "Aqua — минималистичный браузер, весь трафик через свой сервер",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "author": "Aqvarel",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.aqvarel.aqua",
+    "productName": "Aqua",
+    "mac": { "category": "public.app-category.utilities", "target": "dmg" },
+    "files": ["main.js", "preload.js", "ui/**/*", "config.json"]
+  }
+}
