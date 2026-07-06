@@ -1,10 +1,20 @@
 {
-  "proxy": {
-    "host": "ВАШ_IP_СЕРВЕРА",
-    "port": 8888,
-    "user": "aqua",
-    "pass": "ВАШ_ПАРОЛЬ_ПРОКСИ"
-  },
+  "proxies": [
+    {
+      "id": "home",
+      "label": "Мой сервер",
+      "host": "ВАШ_IP_СЕРВЕРА",
+      "port": 8888,
+      "user": "aqua",
+      "pass": "ВАШ_ПАРОЛЬ_ПРОКСИ",
+      "type": "http",
+      "color": "#46d3d8",
+      "country": "RU"
+    }
+  ],
+  "activeId": "home",
+  "directMode": false,
+  "rules": [],
   "homepage": "https://www.google.com",
   "searchUrl": "https://www.google.com/search?q="
 }

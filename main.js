@@ -1,45 +1,175 @@
 // Aqua — главный процесс Electron.
-// Окно = наш интерфейс (панель вкладок + адресная строка) поверх,
-// а сами страницы рисуются в WebContentsView, у которого весь трафик
-// направлен через наш прокси-сервер. Логин/пароль к прокси подставляются
-// автоматически, у пользователя ничего не спрашивается.
-const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
+// Интерфейс (вкладки + адресная строка) рисуется поверх, страницы — в
+// WebContentsView с общей сессией, чей прокси можно переключать на лету
+// между несколькими серверами («флот»). Весь трафик идёт через сервер,
+// который выбран активным; при падении прокси срабатывает kill-switch.
+const { app, BrowserWindow, WebContentsView, ipcMain, session, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const tcp = require('net');
 
-const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
-const CHROME_HEIGHT = 92; // высота нашей верхней панели, px (42 вкладки + 50 тулбар)
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+let CFG = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+const CHROME_HEIGHT = 92;
 
 let win;
 const tabs = new Map(); // id -> WebContentsView
 let activeId = null;
 let nextId = 1;
 
-// Логин к прокси приходит на уровне приложения (app 'login'), а не сессии —
-// только так Chromium подставляет пароль в туннель HTTPS (CONNECT).
+// ---- Флот прокси: аутентификация по паре host:port ----
+// Несколько прокси сосуществуют: пароль ищется по адресу того сервера,
+// который сейчас запросил авторизацию (иначе при переключении узлов
+// Chromium подставил бы не тот пароль).
+let credsByHostPort = new Map();
+function rebuildCreds() {
+  credsByHostPort = new Map();
+  for (const p of CFG.proxies || []) credsByHostPort.set(`${p.host}:${p.port}`, { user: p.user, pass: p.pass });
+}
+rebuildCreds();
+
 app.on('login', (event, webContents, details, authInfo, callback) => {
-  if (authInfo.isProxy) {
-    event.preventDefault();
-    callback(CFG.proxy.user, CFG.proxy.pass);
-  }
+  if (!authInfo.isProxy) return;
+  const c = credsByHostPort.get(`${authInfo.host}:${authInfo.port}`);
+  if (c) { event.preventDefault(); callback(c.user, c.pass); }
 });
 
-// Общая сессия со включённым прокси на наш сервер.
+// Одна общая сессия на все вкладки — её прокси меняем на лету.
+let sharedSes = null;
 function proxiedSession() {
-  const ses = session.fromPartition('persist:aqua');
-  ses.setProxy({ proxyRules: `${CFG.proxy.host}:${CFG.proxy.port}` });
-  return ses;
+  if (sharedSes) return sharedSes;
+  sharedSes = session.fromPartition('persist:aqua');
+  installKillSwitch(sharedSes);
+  return sharedSes;
 }
 
-function layoutActive() {
-  if (activeId == null) return;
-  const view = tabs.get(activeId);
-  const { width, height } = win.getContentBounds();
-  view.setBounds({ x: 0, y: CHROME_HEIGHT, width, height: height - CHROME_HEIGHT });
+function activeProxy() {
+  return (CFG.proxies || []).find((p) => p.id === CFG.activeId) || (CFG.proxies || [])[0] || null;
+}
+
+// Применяет активный прокси (или прямое соединение) к общей сессии.
+// Схемы указаны явно (http=/https=), чтобы Chromium не откатился молча
+// на DIRECT и не раскрыл настоящий IP.
+function applyProxy() {
+  const ses = proxiedSession();
+  if (CFG.directMode) return ses.setProxy({ mode: 'direct' });
+  const p = activeProxy();
+  if (!p) return ses.setProxy({ mode: 'direct' });
+  return ses.setProxy({ proxyRules: `http=${p.host}:${p.port};https=${p.host}:${p.port}` });
+}
+
+// ---- Kill-switch: если туннель мёртв, замораживаем весь трафик ----
+// Пока egressAllowed=false, любой запрос отменяется, кроме проверки
+// самого прокси (чтобы уметь обнаружить восстановление).
+let egressAllowed = true;
+const HEALTH_HOST = 'ipinfo.io';
+const HEALTH_URL = 'https://ipinfo.io/json';
+function installKillSwitch(ses) {
+  ses.webRequest.onBeforeRequest((details, cb) => {
+    if (egressAllowed) return cb({});
+    let host = '';
+    try { host = new URL(details.url).hostname; } catch {}
+    if (host === HEALTH_HOST) return cb({}); // разрешаем только проверку прокси
+    cb({ cancel: true });
+  });
 }
 
 function send(channel, payload) {
-  win.webContents.send(channel, payload);
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+// ---- Проверка выхода: реальный IP и гео через активный прокси ----
+const exitCache = {}; // activeId | 'direct' -> {ip,city,countryCode,country}
+
+function probeExit() {
+  return new Promise((resolve) => {
+    let body = '';
+    const request = net.request({ url: HEALTH_URL, session: proxiedSession() });
+    // net.request не проходит через app 'login' — авторизуем прокси на самом запросе
+    request.on('login', (authInfo, cb) => {
+      const p = activeProxy();
+      if (p) cb(p.user, p.pass); else cb();
+    });
+    const to = setTimeout(() => { try { request.abort(); } catch {} resolve(null); }, 5000);
+    request.on('response', (res) => {
+      res.on('data', (d) => (body += d));
+      res.on('end', () => { clearTimeout(to); try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+    });
+    request.on('error', () => { clearTimeout(to); resolve(null); });
+    request.end();
+  });
+}
+
+async function refreshExit() {
+  const key = CFG.directMode ? 'direct' : CFG.activeId;
+  const data = await probeExit();
+  if (data && data.ip) {
+    egressAllowed = true;
+    exitCache[key] = data;
+    send('proxy-state', 'protected');
+    // ipinfo.io: { ip, city, country (2-буквенный код) }
+    send('exit-updated', { ip: data.ip, city: data.city, countryCode: data.country, country: data.country });
+  } else {
+    egressAllowed = false; // туннель не отвечает — замораживаем выход
+    send('proxy-state', 'paused');
+    send('exit-updated', { ip: null });
+  }
+}
+
+// Быстрая TCP-проверка доступности узла (для бейджей задержки в «Хранилище»).
+function tcpProbe(host, port) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const sock = tcp.connect(Number(port), host);
+    const done = (r) => { clearTimeout(to); try { sock.destroy(); } catch {} resolve(r); };
+    const to = setTimeout(() => done({ ok: false }), 3000);
+    sock.on('connect', () => done({ ok: true, ms: Date.now() - start }));
+    sock.on('error', () => done({ ok: false }));
+  });
+}
+
+function writeConfig() {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(CFG, null, 2));
+}
+
+function slugify(label, taken) {
+  let base = (label || 'node').toLowerCase().replace(/[^a-z0-9а-я]+/gi, '-').replace(/^-+|-+$/g, '') || 'node';
+  let id = base, n = 2;
+  while (taken.has(id)) id = `${base}-${n++}`;
+  return id;
+}
+
+// Нормализует список прокси из интерфейса: валидирует, выдаёт id.
+function normalizeProxies(list) {
+  const taken = new Set();
+  const out = [];
+  for (const p of list || []) {
+    const host = String(p.host || '').trim();
+    const port = parseInt(p.port, 10);
+    if (!host || !port) continue;
+    const id = p.id && !taken.has(p.id) ? p.id : slugify(p.label || host, taken);
+    taken.add(id);
+    out.push({
+      id,
+      label: String(p.label || host).trim(),
+      host, port,
+      user: String(p.user || ''),
+      pass: String(p.pass || ''),
+      type: 'http',
+      color: p.color || '#46d3d8',
+      country: p.country || null,
+    });
+  }
+  return out;
+}
+
+// ---- слои интерфейса ----
+function layoutActive() {
+  if (activeId == null) return;
+  const view = tabs.get(activeId);
+  if (!view) return;
+  const { width, height } = win.getContentBounds();
+  view.setBounds({ x: 0, y: CHROME_HEIGHT, width, height: height - CHROME_HEIGHT });
 }
 
 function wireView(id, view) {
@@ -58,17 +188,13 @@ function wireView(id, view) {
   wc.on('did-navigate', push);
   wc.on('did-navigate-in-page', push);
   wc.on('page-title-updated', push);
-  wc.setWindowOpenHandler(({ url }) => {
-    createTab(url);
-    return { action: 'deny' };
-  });
+  wc.setWindowOpenHandler(({ url }) => { createTab(url); return { action: 'deny' }; });
 }
 
 function createTab(url) {
   const id = nextId++;
-  const ses = proxiedSession();
   const view = new WebContentsView({
-    webPreferences: { session: ses, contextIsolation: true, sandbox: true },
+    webPreferences: { session: proxiedSession(), contextIsolation: true, sandbox: true },
   });
   tabs.set(id, view);
   win.contentView.addChildView(view);
@@ -82,7 +208,6 @@ function createTab(url) {
 function activateTab(id) {
   if (!tabs.has(id)) return;
   activeId = id;
-  // прячем все, показываем активную
   for (const [tid, v] of tabs) v.setVisible(tid === id);
   layoutActive();
   send('tab-activated', { id });
@@ -109,7 +234,6 @@ function closeTab(id) {
   }
 }
 
-// Превращает ввод адресной строки в URL: домен → открыть, иначе поиск.
 function toURL(input) {
   const s = input.trim();
   if (/^https?:\/\//i.test(s)) return s;
@@ -117,26 +241,34 @@ function toURL(input) {
   return CFG.searchUrl + encodeURIComponent(s);
 }
 
+function reloadVisible() {
+  const v = tabs.get(activeId);
+  if (v) v.webContents.reload();
+}
+
+function fleetState() {
+  return { proxies: CFG.proxies || [], activeId: CFG.activeId, directMode: !!CFG.directMode };
+}
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 720,
-    minHeight: 480,
-    titleBarStyle: 'hiddenInset', // на macOS: свои кнопки утоплены, красивый безрамочный вид
+    width: 1200, height: 800, minWidth: 760, minHeight: 480,
+    titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 20 },
-    backgroundColor: '#0e0f13',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-    },
+    backgroundColor: '#0a0c12',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
   win.on('resize', layoutActive);
-  win.webContents.once('did-finish-load', () => createTab());
+  win.webContents.once('did-finish-load', async () => {
+    await applyProxy();
+    createTab();
+    refreshExit();
+    setInterval(refreshExit, 6000); // проверка туннеля раз в 6 c
+  });
 }
 
-// ---- команды из интерфейса ----
+// ---- навигация из интерфейса ----
 ipcMain.on('nav', (e, { action, id, value }) => {
   const view = tabs.get(id ?? activeId);
   const wc = view && view.webContents;
@@ -150,6 +282,40 @@ ipcMain.on('nav', (e, { action, id, value }) => {
     case 'closetab': closeTab(id); break;
     case 'activate': activateTab(id); break;
   }
+});
+
+// ---- управление флотом прокси ----
+ipcMain.handle('proxy:list', () => fleetState());
+
+ipcMain.handle('proxy:save', (e, list) => {
+  CFG.proxies = normalizeProxies(list);
+  if (!CFG.proxies.some((p) => p.id === CFG.activeId)) CFG.activeId = CFG.proxies[0] ? CFG.proxies[0].id : null;
+  rebuildCreds();
+  writeConfig();
+  applyProxy();
+  refreshExit();
+  return fleetState();
+});
+
+ipcMain.handle('proxy:setActive', async (e, id) => {
+  if (id === 'direct') {
+    CFG.directMode = true;
+  } else if ((CFG.proxies || []).some((p) => p.id === id)) {
+    CFG.directMode = false;
+    CFG.activeId = id;
+  }
+  writeConfig();
+  await applyProxy();
+  egressAllowed = true; // не морозим на время переключения
+  reloadVisible();
+  refreshExit();
+  return fleetState();
+});
+
+ipcMain.handle('proxy:test', async (e, id) => {
+  const p = (CFG.proxies || []).find((x) => x.id === id);
+  if (!p) return { ok: false };
+  return tcpProbe(p.host, p.port);
 });
 
 app.whenReady().then(createWindow);

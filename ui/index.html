@@ -5,35 +5,45 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; img-src https: data:;" />
 <style>
   /* ============================================================
-     Aqua — премиальный «водный» интерфейс.
-     Слои глубины: ambient-свечение → матовое стекло → контент.
+     Aqua — «Exit-Aware Glass»: интерфейс как прибор к своему серверу.
+     Слои глубины: ambient-свечение (перекрашивается под страну выхода)
+     → матовое стекло → контент.
      ============================================================ */
+
+  /* Регистрируем цвета орбов как анимируемые свойства (для «ауры выхода») */
+  @property --orb-a { syntax: '<color>'; inherits: true; initial-value: rgba(70,211,216,0.28); }
+  @property --orb-b { syntax: '<color>'; inherits: true; initial-value: rgba(106,139,255,0.22); }
+
   :root {
-    /* глубокий чернильно-синий грунт с холодным биасом */
     --ink: #0a0c12;
     --ink-2: #0d1018;
     --text: #eaeef6;
     --muted: #7f889c;
     --muted-2: #5a6274;
 
-    /* стекло: полупрозрачные заливки, сквозь них видно свечение */
     --glass: rgba(255, 255, 255, 0.045);
     --glass-hi: rgba(255, 255, 255, 0.08);
     --glass-line: rgba(255, 255, 255, 0.09);
     --glass-line-hi: rgba(255, 255, 255, 0.16);
     --top-sheen: rgba(255, 255, 255, 0.06);
 
-    /* акцент — аква→индиго */
     --aqua: #46d3d8;
     --indigo: #6a8bff;
     --accent-grad: linear-gradient(135deg, #4fe0e0 0%, #5b9cff 100%);
     --accent-soft: rgba(70, 211, 216, 0.16);
+    /* активный цвет узла — задаётся из renderer при переключении прокси */
+    --node: #46d3d8;
+    --node-grad: linear-gradient(135deg, #4fe0e0 0%, #5b9cff 100%);
 
-    /* цветные «орбы» ambient-фона */
     --orb-a: rgba(70, 211, 216, 0.28);
     --orb-b: rgba(106, 139, 255, 0.22);
 
+    --good: #4ade80;
+    --bad: #ff6b6b;
+    --warn: #f6c66b;
+
     --shadow-lift: 0 10px 30px -12px rgba(0, 0, 0, 0.55);
+    --shadow-pop: 0 18px 50px -18px rgba(0, 0, 0, 0.7);
     --radius-pill: 19px;
   }
   @media (prefers-color-scheme: light) {
@@ -55,6 +65,7 @@
       --orb-a: rgba(70, 211, 216, 0.35);
       --orb-b: rgba(106, 139, 255, 0.3);
       --shadow-lift: 0 10px 30px -14px rgba(40, 60, 110, 0.4);
+      --shadow-pop: 0 18px 50px -18px rgba(40, 60, 110, 0.5);
     }
   }
   :root[data-theme="dark"] { color-scheme: dark; }
@@ -66,12 +77,11 @@
     font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
     color: var(--text);
     background: var(--ink);
-    -webkit-user-select: none;
-    user-select: none;
+    -webkit-user-select: none; user-select: none;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ---- Ambient-свечение: медленно дышащие цветные орбы за панелью ---- */
+  /* ---- Ambient-свечение (перекрашивается под страну выхода) ---- */
   #glow {
     position: fixed;
     inset: -40% -20% auto -20%;
@@ -83,108 +93,78 @@
       radial-gradient(460px 280px at 82% 8%, var(--orb-b), transparent 72%);
     filter: blur(6px);
     animation: drift 22s ease-in-out infinite alternate;
+    transition: --orb-a 1.4s ease, --orb-b 1.4s ease;
   }
   @keyframes drift {
     0%   { transform: translate3d(-3%, -2%, 0) scale(1); }
     100% { transform: translate3d(4%, 3%, 0) scale(1.08); }
   }
+  /* одноразовая волна при переключении узла */
+  #ripple {
+    position: fixed; inset: 0 0 auto 0; height: 92px; z-index: 2;
+    pointer-events: none; opacity: 0;
+    background: radial-gradient(300px 120px at var(--rx, 80%) 0%, var(--node), transparent 70%);
+  }
+  #ripple.go { animation: ripple 0.6s ease-out; }
+  @keyframes ripple { 0% { opacity: 0.5; } 100% { opacity: 0; } }
 
   #chrome {
-    position: relative;
-    z-index: 1;
+    position: relative; z-index: 1;
     -webkit-app-region: drag;
     background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 70%);
     border-bottom: 1px solid var(--glass-line);
   }
-  button, input, .tab { -webkit-app-region: no-drag; }
+  button, input, .tab, textarea { -webkit-app-region: no-drag; }
 
   /* ---- Ряд вкладок ---- */
-  #tabstrip {
-    display: flex;
-    align-items: flex-end;
-    gap: 5px;
-    height: 42px;
-    padding: 8px 10px 0 84px; /* место под «светофор» macOS слева */
-  }
+  #tabstrip { display: flex; align-items: flex-end; gap: 5px; height: 42px; padding: 8px 10px 0 84px; }
   .tab {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    max-width: 220px;
-    min-width: 48px;
-    height: 33px;
+    display: flex; align-items: center; gap: 8px;
+    max-width: 220px; min-width: 48px; height: 33px;
     padding: 0 8px 0 13px;
     border-radius: 12px 12px 2px 2px;
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid transparent;
+    color: var(--muted); background: transparent; border: 1px solid transparent;
     cursor: default;
-    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
     animation: tab-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
   @keyframes tab-in { from { opacity: 0; transform: translateY(3px) scale(0.96); } }
   .tab:hover { background: var(--glass); color: var(--text); }
   .tab.active {
-    color: var(--text);
-    background: var(--glass-hi);
-    border-color: var(--glass-line);
+    color: var(--text); background: var(--glass-hi); border-color: var(--glass-line);
     box-shadow: 0 -1px 0 var(--top-sheen) inset, var(--shadow-lift);
   }
-  .tab .title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12.5px;
-    font-weight: 450;
-  }
+  .tab .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 450; }
   .tab .ico { width: 13px; height: 13px; flex: none; }
-  .tab .ico.spinner {
-    border: 2px solid var(--accent-soft);
-    border-top-color: var(--aqua);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
+  .tab .ico.spinner { border: 2px solid var(--accent-soft); border-top-color: var(--aqua); border-radius: 50%; animation: spin 0.7s linear infinite; }
   .tab .close {
-    width: 19px; height: 19px; flex: none;
-    border: none; border-radius: 6px;
-    background: transparent; color: inherit;
-    font-size: 15px; line-height: 1;
-    opacity: 0; cursor: default;
-    display: grid; place-items: center;
+    width: 19px; height: 19px; flex: none; border: none; border-radius: 6px;
+    background: transparent; color: inherit; font-size: 15px; line-height: 1;
+    opacity: 0; cursor: default; display: grid; place-items: center;
     transition: opacity 0.15s, background 0.15s;
   }
   .tab:hover .close { opacity: 0.6; }
   .tab .close:hover { opacity: 1; background: var(--glass-line-hi); }
   #newtab {
-    width: 31px; height: 31px; flex: none;
-    border: none; border-radius: 9px;
-    background: transparent; color: var(--muted);
-    font-size: 20px; font-weight: 300; cursor: default;
-    display: grid; place-items: center;
+    width: 31px; height: 31px; flex: none; border: none; border-radius: 9px;
+    background: transparent; color: var(--muted); font-size: 20px; font-weight: 300;
+    cursor: default; display: grid; place-items: center;
     transition: background 0.16s, color 0.16s, transform 0.16s;
   }
   #newtab:hover { background: var(--glass); color: var(--text); }
   #newtab:active { transform: scale(0.92); }
 
-  /* ---- Ряд инструментов: матовое стекло на свечении ---- */
+  /* ---- Ряд инструментов ---- */
   #toolbar {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    height: 50px;
-    padding: 0 13px;
+    position: relative; display: flex; align-items: center; gap: 7px;
+    height: 50px; padding: 0 13px;
     background: var(--glass);
-    backdrop-filter: blur(22px) saturate(1.6);
-    -webkit-backdrop-filter: blur(22px) saturate(1.6);
+    backdrop-filter: blur(22px) saturate(1.6); -webkit-backdrop-filter: blur(22px) saturate(1.6);
     box-shadow: 0 1px 0 var(--top-sheen) inset;
   }
   .navbtn {
-    width: 33px; height: 33px; flex: none;
-    border: none; border-radius: 10px;
-    background: transparent; color: var(--text);
-    cursor: default;
+    width: 33px; height: 33px; flex: none; border: none; border-radius: 10px;
+    background: transparent; color: var(--text); cursor: default;
     display: grid; place-items: center;
     transition: background 0.16s, opacity 0.16s, transform 0.12s;
   }
@@ -193,62 +173,183 @@
   .navbtn:disabled { opacity: 0.25; }
   .navbtn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 
-  /* Адресная строка — стеклянная «пилюля» */
   #address {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    height: 36px;
-    padding: 0 6px 0 15px;
-    border-radius: var(--radius-pill);
-    background: var(--glass);
-    border: 1px solid var(--glass-line);
+    flex: 1; display: flex; align-items: center; gap: 8px;
+    height: 36px; padding: 0 6px 0 13px; border-radius: var(--radius-pill);
+    background: var(--glass); border: 1px solid var(--glass-line);
     box-shadow: 0 1px 0 var(--top-sheen) inset;
     transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
   }
   #address:hover { background: var(--glass-hi); }
   #address:focus-within {
-    background: var(--glass-hi);
-    border-color: transparent;
+    background: var(--glass-hi); border-color: transparent;
     box-shadow: 0 0 0 2px var(--aqua), 0 0 0 6px var(--accent-soft), 0 1px 0 var(--top-sheen) inset;
   }
-  #lock { width: 13px; height: 13px; flex: none; color: var(--muted-2); transition: color 0.2s; }
-  #lock.secure { color: var(--aqua); }
+  /* индикатор туннеля (kill-switch): зелёный защищён / красный заморожен */
+  #lock {
+    width: 26px; height: 26px; flex: none; border: none; border-radius: 8px;
+    background: transparent; cursor: default; display: grid; place-items: center;
+    color: var(--muted-2); transition: color 0.2s, background 0.2s;
+  }
+  #lock svg { width: 14px; height: 14px; }
+  #lock.protected { color: var(--good); }
+  #lock.paused { color: var(--bad); background: rgba(255,107,107,0.14); animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
   #url {
-    flex: 1;
-    border: none; outline: none; background: transparent;
+    flex: 1; border: none; outline: none; background: transparent;
     color: var(--text); font-size: 13.5px; letter-spacing: 0.01em;
     -webkit-user-select: text; user-select: text;
   }
   #url::placeholder { color: var(--muted-2); }
-  /* фирменный чип «Aqua» с градиентом */
-  #shield {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 600;
-    color: #eafcff;
-    padding: 5px 11px 5px 9px; border-radius: 15px;
-    background: var(--accent-grad);
-    flex: none;
-    letter-spacing: 0.03em;
-    box-shadow: 0 3px 10px -3px var(--accent-soft), 0 1px 0 rgba(255,255,255,0.25) inset;
-  }
-  #shield svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
 
-  /* ---- Тонкая градиентная полоса загрузки под панелью ---- */
-  #progress {
-    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
-    overflow: hidden; opacity: 0;
-    transition: opacity 0.3s;
+  /* гео-пилюля: флаг + город + IP того выхода, который видит мир */
+  #geo {
+    display: flex; align-items: center; gap: 6px; flex: none;
+    max-width: 190px; height: 26px; padding: 0 10px; border-radius: 13px;
+    background: var(--glass); border: 1px solid var(--glass-line);
+    font-size: 11.5px; color: var(--muted); cursor: default;
+    transition: background 0.16s, color 0.16s;
   }
+  #geo:hover { background: var(--glass-hi); color: var(--text); }
+  #geo .flag { font-size: 13px; line-height: 1; }
+  #geo .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #geo.bad { color: var(--bad); }
+
+  /* фирменный чип «Aqua» — теперь кнопка-переключатель узла (тинт узла) */
+  #shield {
+    display: flex; align-items: center; gap: 5px; flex: none;
+    height: 28px; padding: 0 9px; border: none; border-radius: 15px;
+    background: var(--node-grad); color: #eafcff;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.03em; cursor: default;
+    box-shadow: 0 3px 10px -3px var(--accent-soft), 0 1px 0 rgba(255,255,255,0.25) inset;
+    transition: transform 0.12s, filter 0.16s;
+  }
+  #shield:hover { filter: brightness(1.08); }
+  #shield:active { transform: scale(0.95); }
+  #shield svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+  #shield .caret { opacity: 0.8; font-size: 9px; }
+
+  /* выпадающее меню узлов из чипа */
+  #nodemenu {
+    position: absolute; top: 46px; right: 52px; z-index: 20;
+    width: 260px; padding: 6px; border-radius: 14px;
+    background: var(--ink-2); border: 1px solid var(--glass-line);
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(30px) saturate(1.5); -webkit-backdrop-filter: blur(30px) saturate(1.5);
+    display: none; animation: pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  #nodemenu.open { display: block; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+  .node-row, .menu-action {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 8px 10px; border: none; border-radius: 9px;
+    background: transparent; color: var(--text); font-size: 12.5px; cursor: default; text-align: left;
+    transition: background 0.14s;
+  }
+  .node-row:hover, .menu-action:hover { background: var(--glass-hi); }
+  .node-row .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px rgba(255,255,255,0.05); }
+  .node-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node-row .lat { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .node-row.active .nm { font-weight: 650; }
+  .node-row .check { color: var(--good); font-size: 12px; }
+  #nodemenu .sep { height: 1px; margin: 5px 4px; background: var(--glass-line); }
+  .menu-action { color: var(--muted); font-size: 12px; }
+
+  /* ---- Полоса загрузки ---- */
+  #progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; opacity: 0; transition: opacity 0.3s; }
   #progress.loading { opacity: 1; }
   #progress::before {
-    content: ""; position: absolute; inset: 0;
-    width: 40%;
+    content: ""; position: absolute; inset: 0; width: 40%;
     background: linear-gradient(90deg, transparent, var(--aqua), var(--indigo), transparent);
     animation: slide 1.1s ease-in-out infinite;
   }
   @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+
+  /* ============================================================
+     Хранилище узлов (Vault) — управление флотом прокси
+     ============================================================ */
+  #scrim {
+    position: fixed; inset: 0; z-index: 30; background: rgba(4,6,10,0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.22s;
+  }
+  #scrim.open { opacity: 1; pointer-events: auto; }
+  #vault {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 31;
+    width: 420px; max-width: 92vw;
+    background: var(--ink-2); border-left: 1px solid var(--glass-line);
+    box-shadow: var(--shadow-pop);
+    transform: translateX(100%); transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+    display: flex; flex-direction: column;
+  }
+  #vault.open { transform: translateX(0); }
+  #vault header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 20px 20px 14px; border-bottom: 1px solid var(--glass-line);
+  }
+  #vault header .vt { flex: 1; font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
+  #vault header .vsub { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+  #vclose {
+    width: 30px; height: 30px; border: none; border-radius: 8px; background: var(--glass);
+    color: var(--text); font-size: 16px; cursor: default; display: grid; place-items: center;
+  }
+  #vclose:hover { background: var(--glass-hi); }
+  #vbody { flex: 1; overflow-y: auto; padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+
+  .slab {
+    display: flex; align-items: center; gap: 11px;
+    padding: 12px 13px; border-radius: 13px;
+    background: var(--glass); border: 1px solid var(--glass-line);
+    transition: border-color 0.16s, background 0.16s;
+  }
+  .slab.active { border-color: var(--node); box-shadow: 0 0 0 1px var(--node) inset; }
+  .slab .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px rgba(255,255,255,0.05); }
+  .slab .info { flex: 1; min-width: 0; }
+  .slab .label { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slab .addr { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slab .lat { font-size: 11px; font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 9px; background: var(--glass-line); color: var(--muted); }
+  .slab .lat.good { color: var(--good); } .slab .lat.warn { color: var(--warn); } .slab .lat.bad { color: var(--bad); }
+  .slab .acts { display: flex; gap: 4px; }
+  .slab .icobtn { width: 26px; height: 26px; border: none; border-radius: 7px; background: transparent; color: var(--muted); cursor: default; display: grid; place-items: center; font-size: 13px; }
+  .slab .icobtn:hover { background: var(--glass-hi); color: var(--text); }
+  .slab.active .acts .use { color: var(--good); }
+
+  .vbtn {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    height: 40px; border: 1px solid var(--glass-line); border-radius: 11px;
+    background: var(--glass); color: var(--text); font-size: 12.5px; font-weight: 550; cursor: default;
+    transition: background 0.16s;
+  }
+  .vbtn:hover { background: var(--glass-hi); }
+  .vbtn.primary { background: var(--accent-grad); color: #eafcff; border-color: transparent; box-shadow: 0 3px 12px -4px var(--accent-soft); }
+  .vsection-title { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-2); margin: 6px 2px 0; }
+
+  /* форма добавления/редактирования */
+  .vform { display: none; flex-direction: column; gap: 9px; padding: 13px; border-radius: 13px; background: var(--glass); border: 1px solid var(--glass-line); }
+  .vform.open { display: flex; }
+  .vrow { display: flex; gap: 9px; }
+  .vfield { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .vfield label { font-size: 10.5px; color: var(--muted); letter-spacing: 0.03em; }
+  .vfield input {
+    height: 34px; padding: 0 11px; border-radius: 9px;
+    background: var(--ink); border: 1px solid var(--glass-line); color: var(--text);
+    font-size: 12.5px; outline: none; -webkit-user-select: text; user-select: text;
+    transition: border-color 0.16s, box-shadow 0.16s;
+  }
+  .vfield input:focus { border-color: var(--aqua); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .vfield input[type="color"] { padding: 3px; width: 46px; flex: none; cursor: default; }
+  .vform .verr { font-size: 11px; color: var(--bad); min-height: 14px; }
+
+  #paste { min-height: 74px; resize: vertical; padding: 10px 11px; border-radius: 10px; background: var(--ink); border: 1px solid var(--glass-line); color: var(--text); font-size: 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; outline: none; -webkit-user-select: text; user-select: text; }
+  #paste:focus { border-color: var(--aqua); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .direct-toggle { display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-radius: 13px; background: var(--glass); border: 1px solid var(--glass-line); }
+  .direct-toggle .info { flex: 1; }
+  .direct-toggle .label { font-size: 13px; font-weight: 600; }
+  .direct-toggle .sub { font-size: 11px; color: var(--muted); }
+  .sw { width: 42px; height: 24px; border-radius: 12px; background: var(--glass-line-hi); border: none; position: relative; cursor: default; transition: background 0.2s; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+  .sw.on { background: var(--warn); }
+  .sw.on::after { transform: translateX(18px); }
 
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
@@ -256,31 +357,78 @@
 </head>
 <body>
   <div id="glow"></div>
+  <div id="ripple"></div>
   <div id="chrome">
     <div id="tabstrip">
       <button id="newtab" title="Новая вкладка">+</button>
     </div>
     <div id="toolbar">
-      <button class="navbtn" id="back" title="Назад" disabled>
-        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
-      <button class="navbtn" id="forward" title="Вперёд" disabled>
-        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
-      </button>
-      <button class="navbtn" id="reload" title="Обновить">
-        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v5h-5"/></svg>
-      </button>
+      <button class="navbtn" id="back" title="Назад" disabled><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="navbtn" id="forward" title="Вперёд" disabled><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      <button class="navbtn" id="reload" title="Обновить"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v5h-5"/></svg></button>
       <div id="address">
-        <svg id="lock" class="secure" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm3 8H9V7a3 3 0 016 0v3z"/></svg>
+        <button id="lock" class="protected" title="Туннель защищён — весь трафик идёт через ваш сервер">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v7a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm3 8H9V7a3 3 0 016 0v3z"/></svg>
+        </button>
         <input id="url" type="text" placeholder="Поиск или адрес сайта" spellcheck="false" autocomplete="off" />
-        <span id="shield" title="Весь трафик идёт через ваш сервер">
+        <span id="geo" title="Где ваш трафик выходит в интернет"><span class="flag">🏳️</span><span class="where">определяю…</span></span>
+        <button id="shield" title="Активный сервер выхода — нажмите, чтобы переключить">
           <svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></svg>
-          Aqua
-        </span>
+          <span class="nm">Aqua</span><span class="caret">▾</span>
+        </button>
       </div>
+      <button class="navbtn" id="gear" title="Серверы и настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2l-.4-2.6h-4l-.4 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12a7 7 0 00.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2l.4 2.6h4l.4-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0019 12z"/></svg></button>
       <div id="progress"></div>
     </div>
   </div>
+
+  <!-- меню быстрого переключения узлов -->
+  <div id="nodemenu"></div>
+
+  <!-- Хранилище узлов -->
+  <div id="scrim"></div>
+  <aside id="vault">
+    <header>
+      <div class="vt">Серверы выхода<div class="vsub">Весь трафик Aqua идёт через выбранный сервер</div></div>
+      <button id="vclose" title="Закрыть">×</button>
+    </header>
+    <div id="vbody">
+      <div class="vsection-title">Ваш флот</div>
+      <div id="slabs"></div>
+      <button class="vbtn" id="addBtn">+ Добавить сервер</button>
+
+      <div class="vform" id="form">
+        <div class="vrow">
+          <div class="vfield" style="flex:2"><label>Название</label><input id="f_label" placeholder="Например, Франкфурт" /></div>
+          <div class="vfield" style="flex:0"><label>Цвет</label><input id="f_color" type="color" value="#46d3d8" /></div>
+        </div>
+        <div class="vrow">
+          <div class="vfield" style="flex:3"><label>Адрес (host)</label><input id="f_host" placeholder="123.45.67.89" spellcheck="false" /></div>
+          <div class="vfield" style="flex:1"><label>Порт</label><input id="f_port" placeholder="8888" inputmode="numeric" /></div>
+        </div>
+        <div class="vrow">
+          <div class="vfield"><label>Логин</label><input id="f_user" placeholder="aqua" spellcheck="false" /></div>
+          <div class="vfield"><label>Пароль</label><input id="f_pass" placeholder="••••••" spellcheck="false" /></div>
+        </div>
+        <div class="verr" id="formErr"></div>
+        <div class="vrow">
+          <button class="vbtn primary" id="saveBtn" style="flex:1">Сохранить</button>
+          <button class="vbtn" id="cancelBtn" style="flex:0; padding:0 16px">Отмена</button>
+        </div>
+      </div>
+
+      <div class="vsection-title">Вставить списком</div>
+      <textarea id="paste" placeholder="По строке на сервер:&#10;host:port:логин:пароль&#10;или host:port"></textarea>
+      <button class="vbtn" id="importBtn">Импортировать строки</button>
+
+      <div class="vsection-title">Соединение</div>
+      <div class="direct-toggle">
+        <div class="info"><div class="label">Прямое соединение</div><div class="sub">Без прокси — сайты увидят ваш настоящий IP</div></div>
+        <button class="sw" id="directSw" title="Переключить прямое соединение"></button>
+      </div>
+    </div>
+  </aside>
+
   <script src="renderer.js"></script>
 </body>
 </html>
